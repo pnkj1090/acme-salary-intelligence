@@ -1,0 +1,444 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ACME Salary Intelligence — Hardened AWS-Native Architecture in ap-south-1 (Mumbai)
+
+Parameters:
+  AppEnvironment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging]
+    Description: Deployment environment identifier
+
+  DBUsername:
+    Type: String
+    Default: acme_admin
+    Description: Master username for Amazon RDS PostgreSQL
+    AllowedPattern: '^[a-zA-Z0-9_]+$'
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for Amazon RDS PostgreSQL
+    MinLength: 8
+    MaxLength: 41
+
+Resources:
+  # ============================================================================
+  # 1. NETWORKING (VPC, SUBNETS, ROUTE TABLES)
+  # ============================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: acme-salary-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: acme-salary-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets (For Single-Instance Elastic Beanstalk EC2 with direct IGW egress; eliminates NAT Gateway charges)
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: ap-south-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: acme-public-subnet-1a
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: ap-south-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: acme-public-subnet-1b
+
+  # Private Subnets (Strictly isolated for Amazon RDS PostgreSQL across 2 AZs)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: ap-south-1a
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: acme-private-subnet-1a
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: ap-south-1b
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: acme-private-subnet-1b
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: acme-public-rt
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ============================================================================
+  # 2. SECURITY GROUPS (LEAST-PRIVILEGE INGRESS)
+  # ============================================================================
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ACME FastAPI Elastic Beanstalk EC2
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Inbound HTTP from CloudFront / Web (Nginx proxies loopback to Uvicorn port 5000)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Inbound HTTPS
+        # Port 5000 is intentionally NOT exposed publicly. Nginx reverse-proxies port 80 to port 5000 internally.
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Outbound access for package installation and DB connection
+      Tags:
+        - Key: Name
+          Value: acme-backend-sg
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for private Amazon RDS PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref BackendSecurityGroup
+          Description: PostgreSQL access strictly from Backend EC2 security group
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: acme-database-sg
+
+  # ============================================================================
+  # 3. SECRETS MANAGER (AUTOMATIC CREDENTIAL GENERATION & PROTECTION)
+  # ============================================================================
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'acme-salary-db-${AWS::StackName}'
+      Description: Managed credentials for ACME Salary PostgreSQL Database
+      SecretString: !Sub '{"username": "${DBUsername}", "password": "${DBPassword}", "dbname": "acme_salary", "engine": "postgres"}'
+      Tags:
+        - Key: Environment
+          Value: !Ref AppEnvironment
+
+  # ============================================================================
+  # 4. IAM ROLES & INSTANCE PROFILE (ELASTIC BEANSTALK EC2)
+  # ============================================================================
+  AppInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'acme-salary-eb-role-${AWS::StackName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+      Policies:
+        - PolicyName: ReadDatabaseSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DBSecret
+
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'acme-salary-eb-profile-${AWS::StackName}'
+      Roles:
+        - !Ref AppInstanceRole
+
+  # ============================================================================
+  # 5. AMAZON RDS POSTGRESQL (PRIVATE)
+  # ============================================================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private isolated subnets for ACME RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: acme-db-subnet-group
+
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: acme-salary-db
+      AllocatedStorage: '20'
+      StorageType: gp3
+      DBInstanceClass: db.t4g.micro
+      Engine: postgres
+      EngineVersion: '15.18'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: acme_salary
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 1
+      DeleteAutomatedBackups: true
+      Tags:
+        - Key: Environment
+          Value: !Ref AppEnvironment
+
+  # ============================================================================
+  # 6. ELASTIC BEANSTALK (BACKEND APPLICATION & ENVIRONMENT)
+  # ============================================================================
+  EBApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: acme-salary-intelligence
+      Description: ACME Salary Intelligence Platform Backend Application
+
+  EBEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    DependsOn:
+      - PostgresDB
+      - AppInstanceProfile
+    Properties:
+      ApplicationName: !Ref EBApplication
+      EnvironmentName: acme-salary-prod
+      CNAMEPrefix: !Sub 'acme-salary-${AWS::AccountId}'
+      Description: Production FastAPI single-instance environment
+      SolutionStackName: 64bit Amazon Linux 2023 v4.13.11 running Python 3.11
+      OptionSettings:
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: SingleInstance
+        - Namespace: aws:ec2:instances
+          OptionName: InstanceTypes
+          Value: t3.micro
+        - Namespace: aws:ec2:vpc
+          OptionName: VPCId
+          Value: !Ref VPC
+        - Namespace: aws:ec2:vpc
+          OptionName: Subnets
+          Value: !Ref PublicSubnet1
+        - Namespace: aws:ec2:vpc
+          OptionName: AssociatePublicIpAddress
+          Value: 'true'
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: SecurityGroups
+          Value: !Ref BackendSecurityGroup
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref AppInstanceProfile
+        - Namespace: aws:elasticbeanstalk:application
+          OptionName: Application Healthcheck URL
+          Value: /
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: HealthCheckPath
+          Value: /
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: Port
+          Value: '5000'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: ENVIRONMENT
+          Value: !Ref AppEnvironment
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DATABASE_SECRET_ARN
+          Value: !Ref DBSecret
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DATABASE_URL
+          Value: !Sub 'postgresql+psycopg2://${DBUsername}:${DBPassword}@${PostgresDB.Endpoint.Address}:${PostgresDB.Endpoint.Port}/acme_salary'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: READ_ONLY_MODE
+          Value: 'true'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PORT
+          Value: '5000'
+
+  # ============================================================================
+  # 7. FRONTEND S3 BUCKET & CLOUDFRONT DISTRIBUTION
+  # ============================================================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'acme-salary-frontend-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Environment
+          Value: !Ref AppEnvironment
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: acme-frontend-oac
+        Description: Origin Access Control for private S3 frontend
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: ACME Salary Intelligence Unified CDN
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_All
+        Origins:
+          # Origin 1: S3 Static Frontend (React SPA)
+          - Id: S3FrontendOrigin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig: {}
+          # Origin 2: Elastic Beanstalk FastAPI Backend
+          - Id: BackendAPIOrigin
+            DomainName: !Sub 'acme-salary-${AWS::AccountId}.${AWS::Region}.elasticbeanstalk.com'
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        # Default behavior: Serve Frontend from S3 with edge caching
+        DefaultCacheBehavior:
+          TargetOriginId: S3FrontendOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        # API behavior: Route /api/* directly to Elastic Beanstalk (Zero CORS preflight)
+        CacheBehaviors:
+          - PathPattern: '/api/*'
+            TargetOriginId: BackendAPIOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            Compress: false
+            ForwardedValues:
+              QueryString: true
+              Headers: ['*']
+              Cookies:
+                Forward: all
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+  RDSEndpoint:
+    Description: Private PostgreSQL Database Endpoint
+    Value: !GetAtt PostgresDB.Endpoint.Address
+  DatabaseSecretArn:
+    Description: AWS Secrets Manager Secret ARN for Database
+    Value: !Ref DBSecret
+  BackendURL:
+    Description: Elastic Beanstalk Direct URL
+    Value: !Sub 'http://acme-salary-${AWS::AccountId}.${AWS::Region}.elasticbeanstalk.com'
+  CloudFrontURL:
+    Description: Primary Live Production Application URL (HTTPS)
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
+  FrontendBucketName:
+    Description: S3 Bucket Name for Frontend Assets
+    Value: !Ref FrontendBucket

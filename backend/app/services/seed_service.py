@@ -278,6 +278,13 @@ def seed_database(db: Session, target_count: int = TARGET_EMPLOYEE_COUNT) -> Dic
     db.bulk_insert_mappings(Compensation, compensations_to_insert)
     db.commit()
 
+    # Synchronize PostgreSQL primary key sequences with max id
+    if db.bind and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT setval(pg_get_serial_sequence('departments', 'id'), coalesce(max(id), 1)) FROM departments;"))
+        db.execute(text("SELECT setval(pg_get_serial_sequence('employees', 'id'), coalesce(max(id), 1)) FROM employees;"))
+        db.execute(text("SELECT setval(pg_get_serial_sequence('compensations', 'id'), coalesce(max(id), 1)) FROM compensations;"))
+        db.commit()
+
     return {
         "departments_count": len(dept_objs),
         "employees_count": len(employees_to_insert),

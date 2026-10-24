@@ -76,27 +76,51 @@ export const Sidebar: React.FC = () => {
       {/* Navigation List */}
       <List sx={{ px: 1.5, py: 2 }}>
         {NAV_ITEMS.map((item) => (
-          <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
+          <ListItem key={item.path} disablePadding sx={{ mb: 0.75 }}>
             <ListItemButton
               component={NavLink}
               to={item.path}
               sx={{
                 borderRadius: 2,
-                color: '#94a3b8',
-                '&.active': {
-                  backgroundColor: '#1e293b',
-                  color: '#ffffff',
-                  '& .MuiListItemIcon-root': {
-                    color: '#6366f1',
-                  },
+                py: 1,
+                px: 1.5,
+                color: '#cbd5e1',
+                transition: 'all 0.15s ease-in-out',
+                '& .MuiListItemIcon-root': {
+                  color: '#94a3b8',
+                  minWidth: 38,
+                  transition: 'color 0.15s ease-in-out',
+                },
+                '& .MuiTypography-root': {
+                  color: '#cbd5e1',
+                  transition: 'color 0.15s ease-in-out',
                 },
                 '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
                   color: '#ffffff',
+                  '& .MuiListItemIcon-root': {
+                    color: '#ffffff',
+                  },
+                  '& .MuiTypography-root': {
+                    color: '#ffffff',
+                  },
+                },
+                '&.active': {
+                  background: 'linear-gradient(90deg, rgba(99, 102, 241, 0.22) 0%, rgba(99, 102, 241, 0.10) 100%)',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)',
+                  color: '#ffffff',
+                  '& .MuiListItemIcon-root': {
+                    color: '#818cf8',
+                  },
+                  '& .MuiTypography-root': {
+                    color: '#ffffff',
+                    fontWeight: 600,
+                  },
                 },
               }}
             >
-              <ListItemIcon sx={{ color: '#64748b', minWidth: 40 }}>
+              <ListItemIcon>
                 {item.icon}
               </ListItemIcon>
               <ListItemText
@@ -104,6 +128,7 @@ export const Sidebar: React.FC = () => {
                 primaryTypographyProps={{
                   fontSize: '0.875rem',
                   fontWeight: 500,
+                  color: 'inherit',
                 }}
               />
             </ListItemButton>

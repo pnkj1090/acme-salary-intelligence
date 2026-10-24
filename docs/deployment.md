@@ -1,153 +1,152 @@
-# Production Deployment & Hosting Guide
+# Production Deployment & Hosting Guide (AWS)
 
 ## 1. Deployment Topology
 
-ACME Salary Intelligence is structured for production deployment across decoupled static edge and containerized API tiers:
+**ACME Salary Intelligence** is deployed on **Amazon Web Services (AWS)** in the `ap-south-1` (Asia Pacific - Mumbai) region. The infrastructure is modeled as Infrastructure as Code (IaC) using AWS CloudFormation, ensuring high availability, security isolation, and sub-second performance.
 
-- **Frontend (Static Single Page Application)**: Hosted on **Vercel** (or Netlify / Cloudflare Pages) with global CDN edge caching.
-- **Backend (Python ASGI Container)**: Deployed on **Render** (or Fly.io / Railway / AWS ECS) running Uvicorn + FastAPI.
-- **Database (Relational Engine)**: Managed **PostgreSQL 15+** (e.g. Render Postgres, Supabase, Neon, AWS RDS) with persistent SSD storage and connection pooling.
+The production deployment architecture uses a **Unified CloudFront Distribution** that provides a single HTTPS entrypoint for both the React SPA and the FastAPI backend:
 
 ```
-                    ┌─────────────────────────────────┐
-                    │     Vercel Edge Network         │
-                    │   React 18 + Vite Production    │
-                    └────────────────┬────────────────┘
-                                     │ HTTPS API calls
-                                     ▼
-                    ┌─────────────────────────────────┐
-                    │     Render Web Service          │
-                    │      Uvicorn + FastAPI          │
-                    └────────────────┬────────────────┘
-                                     │ SQLAlchemy 2.0 Pool
-                                     ▼
-                    ┌─────────────────────────────────┐
-                    │    Managed PostgreSQL 15+       │
-                    │  10,000 Employees + 12k Comps   │
-                    └─────────────────────────────────┘
+                                  ┌────────────────────────────────────────┐
+                                  │      Client Browser (Global)           │
+                                  └───────────────────┬────────────────────┘
+                                                      │ HTTPS
+                                                      ▼
+                                  ┌────────────────────────────────────────┐
+                                  │    Amazon CloudFront CDN (Global)      │
+                                  │  https://d1gy9op4wnx31d.cloudfront.net  │
+                                  └───────┬────────────────────────┬───────┘
+                     Default Cache (/*)   │                        │ Path Pattern (/api/*)
+                     Static Assets        │                        │ All HTTP Methods, No Cache
+                                          ▼                        ▼
+               ┌────────────────────────────────────┐    ┌───────────────────────────────────┐
+               │         Amazon S3 Bucket           │    │    AWS Elastic Beanstalk (AL2023) │
+               │   React 18 + Vite Production SPA   │    │      Python 3.11 + FastAPI        │
+               │   Origin Access Control (OAC)      │    │    acme-salary-api-env            │
+               └────────────────────────────────────┘    └─────────────────┬─────────────────┘
+                                                                           │ Private Subnet
+                                                                           │ SQLAlchemy 2.0 Pool
+                                                                           ▼
+                                                         ┌───────────────────────────────────┐
+                                                         │    Amazon RDS PostgreSQL 15.18    │
+                                                         │    Multi-AZ Isolated Subnets      │
+                                                         │    10,000 Employees + Indexes     │
+                                                         └───────────────────────────────────┘
 ```
+
+### Component Architecture
+| Layer | AWS Service | Configuration & Sizing | Purpose |
+| :--- | :--- | :--- | :--- |
+| **CDN & Edge Routing** | **Amazon CloudFront** | TLS 1.3, Origin Access Control (OAC), Gzip/Brotli compression | Single HTTPS origin for both frontend and backend; eliminates browser cross-origin CORS latency. |
+| **Frontend Hosting** | **Amazon S3** | Private Bucket, Public Access Blocked, SPA 403/404 redirects | High-durability hosting for compiled Vite bundle and static assets. |
+| **Backend API** | **AWS Elastic Beanstalk** | `64bit Amazon Linux 2023 v4.13.11 running Python 3.11` | Scalable ASGI container running FastAPI with Gunicorn/Uvicorn process manager. |
+| **Relational Database**| **Amazon RDS PostgreSQL** | PostgreSQL 15.18, `db.t3.micro`, 20GB gp3 SSD | ACID transactional storage with composite B-tree indexes for sub-300ms queries at 10,000 records. |
+| **Credentials & Secrets**| **AWS Secrets Manager** | `acme/salary/db-credentials` (AES-256 encrypted) | Zero plaintext secrets in code or repository; dynamically read by deployment hooks. |
+| **Network & Isolation**| **Amazon VPC** | 2 Public Subnets + 2 Private Subnets across AZs | RDS is strictly unreachable from the public internet; ingress restricted to Beanstalk Security Group. |
 
 ---
 
-## 2. Environment Variables Configuration
+## 2. Infrastructure as Code (CloudFormation)
 
-### 2.1 Backend Environment Variables (Render Web Service)
-| Variable Name | Production Value Example | Purpose |
-| :--- | :--- | :--- |
-| `ENVIRONMENT` | `production` | Disables debug mode and enables strict production error handling. |
-| `DATABASE_URL` | `postgresql://acme_user:secret@dpg-xxx.render.com/acme_db?sslmode=require` | Managed PostgreSQL connection string. |
-| `CORS_ORIGINS` | `https://acme-salary-intelligence.vercel.app` | Restricts API access exclusively to the production frontend domain. |
-| `HOST` | `0.0.0.0` | Container network interface. |
-| `PORT` | `8000` | Port assigned by hosting provider. |
+The entire AWS infrastructure is declared in [aws/cloudformation.yaml](file:///Users/pnkj/Practice/Assignment/Incubyte%20assignment/aws/cloudformation.yaml).
 
-### 2.2 Frontend Environment Variables (Vercel Project Settings)
-| Variable Name | Production Value Example | Purpose |
-| :--- | :--- | :--- |
-| `VITE_API_BASE_URL` | `https://acme-salary-api.onrender.com` | Base URL pointing the React frontend to the deployed FastAPI backend. |
+### Key CloudFormation Resources
+- `VPC`: Dedicated Virtual Private Cloud with CIDR `10.0.0.0/16`.
+- `PublicSubnet1` & `PublicSubnet2`: Dual-AZ subnets with Internet Gateway routing.
+- `PrivateSubnet1` & `PrivateSubnet2`: Dual-AZ isolated subnets for database workloads.
+- `DBSubnetGroup`: Groups private subnets across multiple AZs for Amazon RDS compliance.
+- `DBInstance`: Amazon RDS PostgreSQL 15.18 with automated storage encryption and backup retention.
+- `DBSecret`: AWS Secrets Manager entry storing master database credentials.
+- `EBApplication` & `EBEnvironment`: Elastic Beanstalk environment with configured system environment variables (`DATABASE_URL`, `ENVIRONMENT=production`, `READ_ONLY_MODE=false`).
+- `FrontendBucket`: Private S3 bucket with OAC bucket policy allowing only the CloudFront distribution.
+- `CloudFrontDistribution`: Unified distribution mapping `/api/*` to Elastic Beanstalk and `/*` to S3.
 
 ---
 
-## 3. Step-by-Step Deployment Instructions
+## 3. Automated One-Command Deployment
 
-### 3.1 Step 1: Provision Managed PostgreSQL
-1. On Render, navigate to **New** → **PostgreSQL Database**.
-2. Name the database `acme-salary-db`.
-3. Set the region matching your intended backend service (e.g. `Oregon (US West)` or `Frankfurt (EU)`).
-4. Copy the **Internal Database URL** (for services within Render) or **External Database URL** (for outside connections).
+The repository includes a comprehensive, automated deployment script: [aws/deploy.sh](file:///Users/pnkj/Practice/Assignment/Incubyte%20assignment/aws/deploy.sh).
 
-### 3.2 Step 2: Deploy Backend to Render
-1. Navigate to **New** → **Web Service** and connect the GitHub repository.
-2. Configure settings:
-   - **Root Directory**: `backend`
-   - **Runtime**: `Python 3`
-   - **Build Command**:
-     ```bash
-     pip install -r requirements.txt && alembic upgrade head
-     ```
-   - **Start Command**:
-     ```bash
-     uvicorn app.main:app --host 0.0.0.0 --port $PORT
-     ```
-3. Add the Environment Variables:
-   - `DATABASE_URL`: Your PostgreSQL URL from Step 1.
-   - `ENVIRONMENT`: `production`
-   - `CORS_ORIGINS`: `https://your-frontend-app.vercel.app`
-4. Deploy the service.
-5. Once deployment completes, note your backend public URL (e.g. `https://acme-salary-api.onrender.com`).
-6. Verify the health check:
-   ```bash
-   curl https://acme-salary-api.onrender.com/api/v1/health
-   # Expected response: {"status":"healthy","database":"connected","version":"1.0.0"}
-   ```
-
-### 3.3 Step 3: Seed 10,000 Employees (One-Time Execution)
-> **CRITICAL**: The application must **NEVER** automatically seed or reset data on container startup. Seeding must be triggered once explicitly via the Render Shell or deployment CLI.
-
-Open the **Render Shell** for your backend service and execute:
+### Executing Full Deployment
 ```bash
-python seed.py  # or: python -m app.db.seed
-```
-Expected output:
-```
-[INFO] Starting database seed...
-[INFO] Generated 10,000 employees and 12,771 compensations.
-[SUCCESS] Seed complete. Exactly 10,000 employees verified in database.
+# Ensure AWS credentials are configured in your shell
+aws sts get-caller-identity
+
+# Run automated end-to-end deployment
+./aws/deploy.sh
 ```
 
-### 3.4 Step 4: Deploy Frontend to Vercel
-1. In Vercel, click **Add New Project** and select the repository.
-2. Configure settings:
-   - **Framework Preset**: `Vite`
-   - **Root Directory**: `frontend`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-   - **Install Command**: `npm install`
-3. Add the Environment Variable:
-   - `VITE_API_BASE_URL`: `https://acme-salary-api.onrender.com`
-4. Click **Deploy**.
-5. Once complete, copy the assigned Vercel URL and update the backend `CORS_ORIGINS` on Render if not already set.
+### What `aws/deploy.sh` Does:
+1. **Validates & Deploys CloudFormation Stack**:
+   - Generates an encrypted random database password.
+   - Creates or updates the `acme-salary-intelligence` CloudFormation stack in `ap-south-1`.
+   - Waits for stack status `CREATE_COMPLETE` or `UPDATE_COMPLETE`.
+2. **Packages Backend Artifact**:
+   - Creates a clean deployment zip containing FastAPI application code, Alembic migrations, database models, and deployment hooks (`backend/.platform/hooks/postdeploy/`).
+   - Excludes local virtual environments (`.venv`), cache files (`__pycache__`), and local SQLite databases.
+3. **Deploys Backend to Elastic Beanstalk**:
+   - Uploads the package to the provisioned Elastic Beanstalk S3 bucket.
+   - Registers a new Application Version (e.g. `app-v1729862900`).
+   - Updates `acme-salary-api-env` to the new version and polls until environment health is `Ready` and `Green`.
+4. **Executes Database Migrations & Seeds 10,000 Employees**:
+   - The post-deploy hook `.platform/hooks/postdeploy/01_migrate_and_seed.sh` automatically runs on instance boot.
+   - Executes `alembic upgrade head`.
+   - Runs idempotent seed script populating 10,000 employees and synchronizes PostgreSQL primary key sequences.
+5. **Builds & Syncs Frontend to S3**:
+   - Executes `npm run build` inside `frontend/` with production environment flags.
+   - Synchronizes compiled assets to the private S3 bucket (`s3://acme-salary-frontend-<account-id>-ap-south-1`).
+6. **Invalidates CloudFront Cache**:
+   - Issues a global cache invalidation for `/*` on CloudFront distribution `E2W941F48UUP4X`.
+   - Ensures the updated UI is immediately visible to global users without stale cache delays.
 
 ---
 
-## 4. Containerization (Dockerfile)
+## 4. Live Verification & Endpoints
 
-For deployment on Docker-based container platforms (AWS ECS, Google Cloud Run, Fly.io), a production multi-stage Dockerfile is provided:
+| Resource | Live Production URL | Notes |
+| :--- | :--- | :--- |
+| **Production Application (Web)** | [https://d1gy9op4wnx31d.cloudfront.net](https://d1gy9op4wnx31d.cloudfront.net) | React 18 SPA served via global CloudFront edge nodes. |
+| **Interactive OpenAPI Documentation** | [https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs](https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs) | Swagger UI for exploring and testing API endpoints live. |
+| **System Health Check** | [https://d1gy9op4wnx31d.cloudfront.net/api/v1/health](https://d1gy9op4wnx31d.cloudfront.net/api/v1/health) | Validates API connectivity and PostgreSQL connection pool. |
 
-```dockerfile
-# backend/Dockerfile
-FROM python:3.11-slim as builder
+### Verifying via CLI
+```bash
+# 1. Verify API Health & PostgreSQL Connectivity
+curl -s https://d1gy9op4wnx31d.cloudfront.net/api/v1/health
+# Expected: {"status":"healthy","database":"connected","version":"1.0.0"}
 
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+# 2. Verify 10,000 Seeded Employees & Database Aggregations
+curl -s https://d1gy9op4wnx31d.cloudfront.net/api/v1/dashboard | jq .
+# Expected: {"total_employees": 10000, "total_departments": 8, "total_countries": 7, ...}
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-FROM python:3.11-slim
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 curl && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
-
-COPY . .
-
-EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/api/v1/health || exit 1
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 3. Verify Pagination Performance Benchmark
+time curl -s "https://d1gy9op4wnx31d.cloudfront.net/api/v1/employees?page=1&size=25" > /dev/null
+# Sub-300ms round-trip response time over global HTTPS
 ```
 
 ---
 
-## 5. Pre-Flight Verification Checklist
+## 5. Security & Production Hardening
 
-Before opening the production application to HR managers:
-- [ ] Database migrations applied via `alembic upgrade head`.
-- [ ] Exactly 10,000 employees seeded and verified (`/api/v1/dashboard` returns `total_employees: 10000`).
-- [ ] Health check endpoint `/api/v1/health` returns HTTP 200 with `status: "healthy"`.
-- [ ] CORS headers permit only the production Vercel domain.
-- [ ] Production frontend loads without console errors and displays live metrics.
-- [ ] Filtered CSV export downloads successfully with sanitized formulas.
-- [ ] Employee search, update, and compensation questions return accurate, sub-second responses.
+1. **Origin Access Control (OAC)**: The S3 frontend bucket blocks all direct public HTTP/S3 access. Only CloudFront's service principal can retrieve objects via signed requests.
+2. **Same-Origin API Routing**: Because CloudFront routes both static frontend requests (`/*`) and API calls (`/api/*`) through the same HTTPS hostname, browser cross-origin preflight requests (OPTIONS) are eliminated, improving performance and security.
+3. **Database Network Isolation**: Amazon RDS PostgreSQL is placed in private VPC subnets with no public IP allocation. Inbound traffic on port 5432 is strictly allowed only from the Elastic Beanstalk EC2 security group.
+4. **Encrypted Secrets Management**: Master database credentials are generated using high-entropy alphanumeric strings, encrypted with AWS KMS, and stored in AWS Secrets Manager.
+5. **CSV Formula Injection Neutralization**: Export endpoints sanitize all cell contents starting with `=`, `+`, `-`, or `@` to prevent spreadsheet command execution.
+6. **Demo Mode Safeguards**: Write operations can be constrained in production by setting `READ_ONLY_MODE=true` in Elastic Beanstalk configuration.
+
+---
+
+## 6. Teardown & Clean Up
+
+To cleanly decommission all AWS resources and prevent ongoing charges:
+
+```bash
+# Execute automated teardown script
+./aws/teardown.sh
+```
+
+This script:
+1. Empties the S3 frontend bucket (including versioned markers).
+2. Deletes the CloudFormation stack `acme-salary-intelligence`.
+3. Monitors deletion of Elastic Beanstalk environments, RDS instances, Security Groups, Subnets, and VPC until complete.

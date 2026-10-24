@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
+import sys
 import time
 
 from app.core.database import SessionLocal
+from app.models.employee import Employee
 from app.services.seed_service import seed_database
 
 
@@ -13,6 +16,12 @@ def main():
 
     db = SessionLocal()
     try:
+        current_count = db.query(Employee).count()
+        if current_count >= 10000 and "--force" not in sys.argv:
+            print(f"ℹ️ Database already populated ({current_count} employees found). Skipping to preserve existing data.")
+            print("   Pass '--force' flag to explicitly trigger a full re-seed.")
+            return
+
         results = seed_database(db, target_count=10000)
         elapsed = time.time() - start_time
         print(f"✅ Seeding Complete in {elapsed:.2f} seconds!")

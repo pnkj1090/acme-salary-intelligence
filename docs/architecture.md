@@ -161,9 +161,9 @@ To maintain sub-300ms response times with 10,000 employee records and 12,000+ co
 
 ---
 
-## 7. Deployment Topology
+## 7. Deployment Topology (AWS)
 
-The application is structured for production deployment across static edge and managed container tiers:
+The production application is deployed on Amazon Web Services (AWS) using a unified CloudFront distribution that routes static assets to Amazon S3 and API requests to AWS Elastic Beanstalk:
 
 ```mermaid
 graph LR
@@ -171,19 +171,19 @@ graph LR
         Browser[Client Browser]
     end
 
-    subgraph Static Edge Tier
-        Vercel[Vercel / Cloudflare Pages<br/>Vite Production SPA]
+    subgraph CDN & Static Edge Tier
+        CloudFront[Amazon CloudFront CDN<br/>Origin Access Control + S3 SPA]
     end
 
-    subgraph Backend Container Tier
-        Render[Render / Fly.io / AWS ECS<br/>Uvicorn + FastAPI]
+    subgraph Backend Application Tier
+        EB[AWS Elastic Beanstalk<br/>Python 3.11 AL2023 + FastAPI]
     end
 
     subgraph Managed Data Tier
-        Postgres[(Managed PostgreSQL 15+<br/>Connection Pooling)]
+        RDS[(Amazon RDS PostgreSQL 15.18<br/>Multi-AZ Isolated Subnets)]
     end
 
-    Browser -->|Static Assets| Vercel
-    Browser -->|API Calls /api/v1| Render
-    Render -->|SQLAlchemy 2.0 Pool| Postgres
+    Browser -->|Static Assets & Web Routing| CloudFront
+    CloudFront -->|API Calls /api/v1/*| EB
+    EB -->|SQLAlchemy 2.0 Connection Pool| RDS
 ```

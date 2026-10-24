@@ -1,5 +1,6 @@
 # ACME Salary Intelligence — Enterprise HR Compensation Platform
 
+[![AWS Deployed](https://img.shields.io/badge/AWS%20Deployment-Live%20on%20CloudFront-success.svg)](https://d1gy9op4wnx31d.cloudfront.net)
 [![Backend Tests](https://img.shields.io/badge/pytest-16%20passed-brightgreen.svg)]()
 [![Frontend Tests](https://img.shields.io/badge/vitest-13%20passed-brightgreen.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)]()
@@ -7,6 +8,10 @@
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-red.svg)]()
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)]()
 [![Dataset](https://img.shields.io/badge/Dataset-10%2C000%20Employees-orange.svg)]()
+
+> **🚀 Live Production Deployment (AWS)**: [https://d1gy9op4wnx31d.cloudfront.net](https://d1gy9op4wnx31d.cloudfront.net)  
+> **Interactive Swagger API Docs**: [https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs](https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs)  
+> **Health Check Endpoint**: [https://d1gy9op4wnx31d.cloudfront.net/api/v1/health](https://d1gy9op4wnx31d.cloudfront.net/api/v1/health)
 
 > A full-stack compensation intelligence application built for the fictional global organization **ACME**, managing **10,000 employees** across 7 countries and 7 currencies. Built for the hiring assessment to demonstrate product thinking, engineering fundamentals, relational modeling, sub-second query performance at scale, and UX polish.
 
@@ -166,7 +171,7 @@ Comprehensive engineering documents are located in the `docs/` directory:
 | [docs/architecture.md](docs/architecture.md) | System architecture, component responsibilities, data flow, ER diagrams. |
 | [docs/decisions.md](docs/decisions.md) | Architecture Decision Records (ADR-001 through ADR-007). |
 | [docs/testing.md](docs/testing.md) | Testing strategy, test inventory, execution logs, and benchmark SLAs. |
-| [docs/deployment.md](docs/deployment.md) | Production deployment guide for Vercel, Render, and PostgreSQL. |
+| [docs/deployment.md](docs/deployment.md) | Production deployment guide for AWS (CloudFormation, Elastic Beanstalk, RDS, CloudFront). |
 | [docs/ai-development-log.md](docs/ai-development-log.md) | Engineering record of prompts, human decisions, discovered bugs, and fixes. |
 | [docs/known-limitations.md](docs/known-limitations.md) | Assessment demo boundaries, authentication scope, and future roadmap. |
 
