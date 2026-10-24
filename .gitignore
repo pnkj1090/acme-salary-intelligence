@@ -50,3 +50,6 @@ frontend/dist/
 # Environment
 .env
 !.env.example
+
+# Local Only Documentation
+docs/demo-script.md
