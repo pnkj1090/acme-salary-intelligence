@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "ACME Salary Intelligence"
     DATABASE_URL: str = "sqlite:///./acme_salary.db"
+    READ_ONLY_MODE: bool = False
+    ADMIN_API_KEY: Optional[str] = None
 
     @field_validator("DATABASE_URL", mode="after")
     @classmethod

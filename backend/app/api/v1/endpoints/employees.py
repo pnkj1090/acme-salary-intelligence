@@ -1,9 +1,10 @@
 import math
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.employee import (
     EmployeeCreate,
@@ -21,6 +22,16 @@ from app.services.employee_service import (
 )
 
 router = APIRouter()
+
+
+def verify_write_permission(x_admin_key: Optional[str] = Header(None)) -> None:
+    """Safeguards write-capable operations in public demo environments."""
+    if settings.READ_ONLY_MODE:
+        if not settings.ADMIN_API_KEY or x_admin_key != settings.ADMIN_API_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Modifications are disabled in public demo mode. Provide a valid X-Admin-Key header to perform changes.",
+            )
 
 
 @router.get("", response_model=EmployeeListResponse, summary="Paginated & Filtered Employee Directory")
@@ -69,13 +80,24 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)):
     return get_employee_by_id(db, employee_id)
 
 
-@router.post("", response_model=EmployeeDetail, status_code=status.HTTP_201_CREATED, summary="Create New Employee")
+@router.post(
+    "",
+    response_model=EmployeeDetail,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create New Employee",
+    dependencies=[Depends(verify_write_permission)],
+)
 def create_new_employee(emp_in: EmployeeCreate, db: Session = Depends(get_db)):
     """Onboards a new employee with initial compensation record and uniqueness validation."""
     return create_employee(db, emp_in)
 
 
-@router.patch("/{employee_id}", response_model=EmployeeDetail, summary="Update Employee & Compensation")
+@router.patch(
+    "/{employee_id}",
+    response_model=EmployeeDetail,
+    summary="Update Employee & Compensation",
+    dependencies=[Depends(verify_write_permission)],
+)
 def update_existing_employee(employee_id: int, emp_in: EmployeeUpdate, db: Session = Depends(get_db)):
     """
     Updates profile details. Salary adjustments close the prior active compensation
@@ -84,7 +106,12 @@ def update_existing_employee(employee_id: int, emp_in: EmployeeUpdate, db: Sessi
     return update_employee(db, employee_id, emp_in)
 
 
-@router.post("/{employee_id}/deactivate", response_model=EmployeeDetail, summary="Deactivate Employee")
+@router.post(
+    "/{employee_id}/deactivate",
+    response_model=EmployeeDetail,
+    summary="Deactivate Employee",
+    dependencies=[Depends(verify_write_permission)],
+)
 def deactivate_existing_employee(employee_id: int, db: Session = Depends(get_db)):
     """Soft-deactivates an employee (marking status INACTIVE) without destroying historical records."""
     return deactivate_employee(db, employee_id)
