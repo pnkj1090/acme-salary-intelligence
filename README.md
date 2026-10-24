@@ -110,7 +110,7 @@ pip install -r requirements.txt
 alembic upgrade head
 
 # Deterministically seed 10,000 employees (completes in ~7 seconds)
-python seed.py
+python seed.py          # or: python -m app.db.seed
 
 # Start the FastAPI development server
 uvicorn app.main:app --reload --port 8000
