@@ -1,6 +1,6 @@
 # ACME Salary Intelligence — Enterprise HR Compensation Platform
 
-[![AWS Deployed](https://img.shields.io/badge/AWS%20Deployment-Live%20on%20CloudFront-success.svg)](https://d1gy9op4wnx31d.cloudfront.net)
+[![Local Setup](https://img.shields.io/badge/Setup-Local%20Environment-blue.svg)]()
 [![Backend Tests](https://img.shields.io/badge/pytest-16%20passed-brightgreen.svg)]()
 [![Frontend Tests](https://img.shields.io/badge/vitest-13%20passed-brightgreen.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)]()
@@ -9,9 +9,10 @@
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)]()
 [![Dataset](https://img.shields.io/badge/Dataset-10%2C000%20Employees-orange.svg)]()
 
-> **🚀 Live Production Deployment (AWS)**: [https://d1gy9op4wnx31d.cloudfront.net](https://d1gy9op4wnx31d.cloudfront.net)  
-> **Interactive Swagger API Docs**: [https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs](https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs)  
-> **Health Check Endpoint**: [https://d1gy9op4wnx31d.cloudfront.net/api/v1/health](https://d1gy9op4wnx31d.cloudfront.net/api/v1/health)
+> **💻 Local Review & Execution**:
+> - **Frontend UI**: [http://localhost:5173](http://localhost:5173)  
+> - **Interactive Swagger API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)  
+> - **Health Check Endpoint**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
 > A full-stack compensation intelligence application built for the fictional global organization **ACME**, managing **10,000 employees** across 7 countries and 7 currencies. Built for the hiring assessment to demonstrate product thinking, engineering fundamentals, relational modeling, sub-second query performance at scale, and UX polish.
 

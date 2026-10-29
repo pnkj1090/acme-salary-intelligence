@@ -14,7 +14,7 @@ The production deployment architecture uses a **Unified CloudFront Distribution*
                                                       ▼
                                   ┌────────────────────────────────────────┐
                                   │    Amazon CloudFront CDN (Global)      │
-                                  │  https://d1gy9op4wnx31d.cloudfront.net  │
+                                  │  https://<distribution-id>.cloudfront.net │
                                   └───────┬────────────────────────┬───────┘
                      Default Cache (/*)   │                        │ Path Pattern (/api/*)
                      Static Assets        │                        │ All HTTP Methods, No Cache
@@ -103,24 +103,24 @@ aws sts get-caller-identity
 
 ## 4. Live Verification & Endpoints
 
-| Resource | Live Production URL | Notes |
+| Resource | Production Endpoint (When Deployed) | Notes |
 | :--- | :--- | :--- |
-| **Production Application (Web)** | [https://d1gy9op4wnx31d.cloudfront.net](https://d1gy9op4wnx31d.cloudfront.net) | React 18 SPA served via global CloudFront edge nodes. |
-| **Interactive OpenAPI Documentation** | [https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs](https://d1gy9op4wnx31d.cloudfront.net/api/v1/docs) | Swagger UI for exploring and testing API endpoints live. |
-| **System Health Check** | [https://d1gy9op4wnx31d.cloudfront.net/api/v1/health](https://d1gy9op4wnx31d.cloudfront.net/api/v1/health) | Validates API connectivity and PostgreSQL connection pool. |
+| **Production Application (Web)** | `https://<distribution-id>.cloudfront.net` | React 18 SPA served via global CloudFront edge nodes. |
+| **Interactive OpenAPI Documentation** | `https://<distribution-id>.cloudfront.net/api/v1/docs` | Swagger UI for exploring and testing API endpoints. |
+| **System Health Check** | `https://<distribution-id>.cloudfront.net/api/v1/health` | Validates API connectivity and PostgreSQL connection pool. |
 
 ### Verifying via CLI
 ```bash
 # 1. Verify API Health & PostgreSQL Connectivity
-curl -s https://d1gy9op4wnx31d.cloudfront.net/api/v1/health
+curl -s https://<distribution-id>.cloudfront.net/api/v1/health
 # Expected: {"status":"healthy","database":"connected","version":"1.0.0"}
 
 # 2. Verify 10,000 Seeded Employees & Database Aggregations
-curl -s https://d1gy9op4wnx31d.cloudfront.net/api/v1/dashboard | jq .
+curl -s https://<distribution-id>.cloudfront.net/api/v1/dashboard | jq .
 # Expected: {"total_employees": 10000, "total_departments": 8, "total_countries": 7, ...}
 
 # 3. Verify Pagination Performance Benchmark
-time curl -s "https://d1gy9op4wnx31d.cloudfront.net/api/v1/employees?page=1&size=25" > /dev/null
+time curl -s "https://<distribution-id>.cloudfront.net/api/v1/employees?page=1&size=25" > /dev/null
 # Sub-300ms round-trip response time over global HTTPS
 ```
 
